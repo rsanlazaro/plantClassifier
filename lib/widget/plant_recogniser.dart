@@ -1,48 +1,122 @@
-// Copyright (c) 2022 Kodeco LLC
-
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-
-// The above copyright notice and this permission notice shall be included in
-// all copies or substantial portions of the Software.
-
-// Notwithstanding the foregoing, you may not use, copy, modify, merge, publish,
-// distribute, sublicense, create a derivative work, and/or sell copies of the
-// Software in any work that is designed, intended, or marketed for pedagogical
-// or instructional purposes related to programming, coding,
-// application development, or information technology.  Permission for such use,
-// copying, modification, merger, publication, distribution, sublicensing,
-// creation of derivative works, or sale is expressly withheld.
-
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-// THE SOFTWARE.
-
+import 'dart:convert';
 import 'dart:io';
-
 import 'package:flutter/material.dart';
-import 'package:image/image.dart' as img;
-import 'package:image_picker/image_picker.dart';
-import '../classifier/classifier.dart';
-import '../styles.dart';
-import 'plant_photo_view.dart';
+import 'package:tflite_flutter/tflite_flutter.dart';
+import 'package:tflite_flutter_helper/tflite_flutter_helper.dart';
 
+// Constants
 const _labelsFileName = 'assets/labels.txt';
-const _modelFileName = 'model_unquant.tflite';
+const _modelFileName = 'model.tflite';
+const _confidenceThreshold = 0.1; // Ajusta este valor según sea necesario
+var largode = 0;
 
-class PlantRecogniser extends StatefulWidget {
-  const PlantRecogniser({super.key});
+// Classifier Class
+class Classifier {
+  late Interpreter _interpreter;
+  late List<String> _labels;
+  final String labelsFileName;
+  final String modelFileName;
+
+  Classifier._({
+    required this.labelsFileName,
+    required this.modelFileName,
+  });
+
+  static Future<Classifier?> loadWith({
+    required String labelsFileName,
+    required String modelFileName,
+  }) async {
+    final classifier = Classifier._(
+      labelsFileName: labelsFileName,
+      modelFileName: modelFileName,
+    );
+
+    try {
+      await classifier._loadModel();
+      await classifier._loadLabels();
+      debugPrint('Model and labels loaded successfully.');
+    } catch (e) {
+      debugPrint('Failed to load model or labels:');
+      debugPrint('$e');
+      return null;
+    }
+
+    return classifier;
+  }
+
+  Future<void> _loadModel() async {
+    _interpreter = await Interpreter.fromAsset(modelFileName);
+    debugPrint(_interpreter.getInputTensor(0).shape.toString());
+  }
+
+  Future<void> _loadLabels() async {
+    final rawLabels = await FileUtil.loadLabels(labelsFileName);
+    _labels = rawLabels;
+  }
+
+  Category predict(List<double> input) {
+    try {
+      largode = input.length;
+      // Imprime la longitud de la entrada y las dimensiones esperadas
+      debugPrint('Input length: ${input.length}');
+      debugPrint(
+          'Expected input dimensions: ${_interpreter.getInputTensor(0).shape}');
+
+      var inputBuffer =
+          TensorBuffer.createFixedSize([1, input.length], TfLiteType.float32);
+      inputBuffer.loadList(input, shape: [1, input.length]);
+
+      var outputBuffer =
+          TensorBuffer.createFixedSize([1, _labels.length], TfLiteType.float32);
+
+      _interpreter.run(inputBuffer.buffer, outputBuffer.buffer);
+
+      // final output = outputBuffer.getDoubleList();
+      // debugPrint('Output values: $output');
+
+      // int highestIndex = 0;
+      // double highestValue = 0.0;
+      //for (int i = 0; i < output.length; i++) {
+      //  if (output[i] > highestValue) {
+      //    highestIndex = i;
+      //    highestValue = output[i];
+      //  }
+      // }
+
+      //debugPrint(
+      //   'Predicted label: ${_labels[highestIndex]}, Score: $highestValue');
+      // return Category(_labels[highestIndex], highestValue);
+      debugPrint('Try correct');
+      return Category('label', 0.8);
+    } catch (e) {
+      debugPrint('Error in predict method: $e');
+      return Category('Error', 0.0);
+    }
+  }
+}
+
+class Category {
+  final String label;
+  final double score;
+  Category(this.label, this.score);
+}
+
+// Styles
+const kBgColor = Colors.white;
+const kColorBrown = Colors.brown;
+const kColorLightYellow = Colors.yellow;
+const kTitleTextStyle = TextStyle(fontSize: 24, fontWeight: FontWeight.bold);
+const kAnalyzingTextStyle =
+    TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.red);
+const kResultTextStyle = TextStyle(fontSize: 20, fontWeight: FontWeight.bold);
+const kResultRatingTextStyle = TextStyle(fontSize: 16);
+
+// ECG Recogniser Widget
+class ECGRecogniser extends StatefulWidget {
+  const ECGRecogniser({super.key});
 
   @override
-  State<PlantRecogniser> createState() => _PlantRecogniserState();
+  State<ECGRecogniser> createState() => _ECGRecogniserState();
 }
 
 enum _ResultStatus {
@@ -51,22 +125,24 @@ enum _ResultStatus {
   found,
 }
 
-class _PlantRecogniserState extends State<PlantRecogniser> {
+class _ECGRecogniserState extends State<ECGRecogniser> {
   bool _isAnalyzing = false;
-  final picker = ImagePicker();
-  File? _selectedImageFile;
 
   // Result
   _ResultStatus _resultStatus = _ResultStatus.notStarted;
-  String _plantLabel = ''; // Name of Error Message
+  String _signalLabel = 'Error come caca'; // Name of Error Message
   double _accuracy = 0.0;
 
-  late Classifier _classifier;
+  Classifier? _classifier;
 
   @override
   void initState() {
     super.initState();
-    _loadClassifier();
+    _loadClassifier().then((_) {
+      if (_classifier != null) {
+        _analyzeVector();
+      }
+    });
   }
 
   Future<void> _loadClassifier() async {
@@ -80,7 +156,15 @@ class _PlantRecogniserState extends State<PlantRecogniser> {
       labelsFileName: _labelsFileName,
       modelFileName: _modelFileName,
     );
-    _classifier = classifier!;
+
+    if (classifier == null) {
+      debugPrint('Failed to load classifier.');
+    } else {
+      debugPrint('Classifier loaded successfully.');
+      setState(() {
+        _classifier = classifier;
+      });
+    }
   }
 
   @override
@@ -97,31 +181,13 @@ class _PlantRecogniserState extends State<PlantRecogniser> {
             child: _buildTitle(),
           ),
           const SizedBox(height: 20),
-          _buildPhotolView(),
+          _buildAnalyzingText(),
           const SizedBox(height: 10),
           _buildResultView(),
           const Spacer(flex: 5),
-          _buildPickPhotoButton(
-            title: 'Take a photo',
-            source: ImageSource.camera,
-          ),
-          _buildPickPhotoButton(
-            title: 'Pick from gallery',
-            source: ImageSource.gallery,
-          ),
           const Spacer(),
         ],
       ),
-    );
-  }
-
-  Widget _buildPhotolView() {
-    return Stack(
-      alignment: AlignmentDirectional.center,
-      children: [
-        PlantPhotoView(file: _selectedImageFile),
-        _buildAnalyzingText(),
-      ],
     );
   }
 
@@ -134,31 +200,9 @@ class _PlantRecogniserState extends State<PlantRecogniser> {
 
   Widget _buildTitle() {
     return const Text(
-      'Plant Recogniser',
+      'ECG Recogniser',
       style: kTitleTextStyle,
       textAlign: TextAlign.center,
-    );
-  }
-
-  Widget _buildPickPhotoButton({
-    required ImageSource source,
-    required String title,
-  }) {
-    return TextButton(
-      onPressed: () => _onPickPhoto(source),
-      child: Container(
-        width: 300,
-        height: 50,
-        color: kColorBrown,
-        child: Center(
-            child: Text(title,
-                style: const TextStyle(
-                  fontFamily: kButtonFont,
-                  fontSize: 20.0,
-                  fontWeight: FontWeight.w600,
-                  color: kColorLightYellow,
-                ))),
-      ),
     );
   }
 
@@ -168,55 +212,1053 @@ class _PlantRecogniserState extends State<PlantRecogniser> {
     });
   }
 
-  void _onPickPhoto(ImageSource source) async {
-    final pickedFile = await picker.pickImage(source: source);
-
-    if (pickedFile == null) {
-      return;
-    }
-
-    final imageFile = File(pickedFile.path);
-    setState(() {
-      _selectedImageFile = imageFile;
-    });
-
-    _analyzeImage(imageFile);
-  }
-
-  void _analyzeImage(File image) {
+  void _analyzeVector() async {
     _setAnalyzing(true);
 
-    final imageInput = img.decodeImage(image.readAsBytesSync())!;
+    try {
+      // Replace this with your actual data vector
+      final List<double> inputData = [
+        272,
+        259,
+        250,
+        392,
+        631,
+        666,
+        666,
+        661,
+        349,
+        213,
+        218,
+        243,
+        255,
+        264,
+        271,
+        273,
+        280,
+        293,
+        313,
+        340,
+        358,
+        363,
+        365,
+        358,
+        348,
+        306,
+        285,
+        298,
+        315,
+        319,
+        313,
+        292,
+        272,
+        264,
+        256,
+        246,
+        226,
+        336,
+        592,
+        666,
+        663,
+        429,
+        221,
+        199,
+        221,
+        241,
+        255,
+        275,
+        285,
+        292,
+        299,
+        303,
+        324,
+        355,
+        378,
+        385,
+        373,
+        336,
+        299,
+        289,
+        305,
+        329,
+        329,
+        314,
+        295,
+        269,
+        264,
+        265,
+        255,
+        293,
+        499,
+        664,
+        667,
+        586,
+        276,
+        208,
+        212,
+        233,
+        248,
+        253,
+        262,
+        279,
+        289,
+        293,
+        296,
+        308,
+        341,
+        370,
+        382,
+        381,
+        354,
+        302,
+        293,
+        301,
+        320,
+        341,
+        344,
+        333,
+        308,
+        285,
+        275,
+        258,
+        247,
+        278,
+        468,
+        664,
+        666,
+        652,
+        329,
+        225,
+        240,
+        246,
+        255,
+        273,
+        282,
+        294,
+        298,
+        306,
+        334,
+        360,
+        375,
+        387,
+        391,
+        374,
+        323,
+        284,
+        306,
+        332,
+        340,
+        341,
+        330,
+        309,
+        289,
+        265,
+        257,
+        240,
+        353,
+        597,
+        665,
+        665,
+        662,
+        389,
+        217,
+        208,
+        226,
+        235,
+        250,
+        252,
+        265,
+        278,
+        289,
+        312,
+        340,
+        357,
+        366,
+        367,
+        363,
+        328,
+        285,
+        285,
+        309,
+        328,
+        327,
+        309,
+        300,
+        275,
+        255,
+        252,
+        243,
+        301,
+        523,
+        664,
+        666,
+        666,
+        503,
+        236,
+        203,
+        233,
+        254,
+        262,
+        267,
+        270,
+        281,
+        295,
+        316,
+        345,
+        367,
+        371,
+        350,
+        310,
+        282,
+        275,
+        300,
+        320,
+        324,
+        322,
+        313,
+        284,
+        266,
+        262,
+        263,
+        241,
+        273,
+        493,
+        665,
+        665,
+        600,
+        294,
+        197,
+        208,
+        232,
+        251,
+        270,
+        281,
+        288,
+        295,
+        320,
+        336,
+        361,
+        373,
+        371,
+        359,
+        316,
+        289,
+        305,
+        317,
+        328,
+        334,
+        317,
+        290,
+        270,
+        262,
+        245,
+        229,
+        225,
+        234,
+        441,
+        665,
+        666,
+        610,
+        345,
+        232,
+        232,
+        245,
+        252,
+        261,
+        277,
+        286,
+        290,
+        299,
+        324,
+        362,
+        378,
+        382,
+        381,
+        356,
+        315,
+        282,
+        305,
+        330,
+        338,
+        384,
+        499,
+        662,
+        665,
+        624,
+        373,
+        221,
+        220,
+        231,
+        243,
+        251,
+        257,
+        268,
+        285,
+        294,
+        313,
+        340,
+        364,
+        381,
+        384,
+        370,
+        330,
+        294,
+        292,
+        310,
+        334,
+        341,
+        325,
+        308,
+        298,
+        271,
+        261,
+        250,
+        242,
+        376,
+        640,
+        665,
+        666,
+        643,
+        380,
+        224,
+        230,
+        250,
+        264,
+        270,
+        281,
+        286,
+        289,
+        308,
+        335,
+        353,
+        368,
+        368,
+        339,
+        303,
+        280,
+        269,
+        297,
+        327,
+        335,
+        334,
+        313,
+        289,
+        274,
+        262,
+        257,
+        240,
+        225,
+        323,
+        623,
+        666,
+        667,
+        648,
+        306,
+        202,
+        217,
+        235,
+        253,
+        266,
+        272,
+        283,
+        286,
+        290,
+        314,
+        343,
+        362,
+        374,
+        371,
+        345,
+        325,
+        286,
+        286,
+        304,
+        329,
+        338,
+        323,
+        305,
+        289,
+        274,
+        257,
+        239,
+        338,
+        585,
+        665,
+        664,
+        430,
+        223,
+        197,
+        221,
+        244,
+        259,
+        265,
+        275,
+        281,
+        291,
+        296,
+        312,
+        334,
+        353,
+        362,
+        366,
+        364,
+        333,
+        296,
+        285,
+        279,
+        297,
+        324,
+        337,
+        331,
+        308,
+        276,
+        269,
+        257,
+        257,
+        240,
+        337,
+        585,
+        666,
+        665,
+        466,
+        238,
+        206,
+        225,
+        254,
+        272,
+        280,
+        292,
+        296,
+        302,
+        315,
+        323,
+        351,
+        372,
+        380,
+        380,
+        357,
+        312,
+        283,
+        297,
+        308,
+        325,
+        334,
+        330,
+        311,
+        287,
+        281,
+        270,
+        258,
+        246,
+        236,
+        492,
+        665,
+        666,
+        556,
+        266,
+        212,
+        225,
+        250,
+        272,
+        284,
+        291,
+        304,
+        316,
+        322,
+        337,
+        359,
+        385,
+        389,
+        377,
+        343,
+        302,
+        299,
+        327,
+        340,
+        348,
+        350,
+        340,
+        320,
+        293,
+        283,
+        269,
+        256,
+        252,
+        242,
+        427,
+        665,
+        668,
+        644,
+        400,
+        252,
+        240,
+        242,
+        255,
+        271,
+        282,
+        291,
+        298,
+        310,
+        328,
+        336,
+        358,
+        387,
+        396,
+        382,
+        338,
+        296,
+        296,
+        323,
+        343,
+        345,
+        342,
+        325,
+        304,
+        286,
+        276,
+        254,
+        301,
+        517,
+        637,
+        666,
+        665,
+        500,
+        264,
+        223,
+        242,
+        257,
+        267,
+        269,
+        280,
+        284,
+        285,
+        309,
+        332,
+        341,
+        359,
+        368,
+        369,
+        361,
+        336,
+        290,
+        274,
+        295,
+        314,
+        324,
+        326,
+        317,
+        298,
+        274,
+        260,
+        252,
+        245,
+        269,
+        438,
+        569,
+        666,
+        666,
+        531,
+        269,
+        211,
+        222,
+        238,
+        244,
+        254,
+        269,
+        277,
+        282,
+        295,
+        318,
+        347,
+        355,
+        370,
+        375,
+        359,
+        310,
+        277,
+        281,
+        306,
+        329,
+        339,
+        336,
+        310,
+        285,
+        272,
+        255,
+        242,
+        231,
+        391,
+        494,
+        663,
+        666,
+        633,
+        325,
+        212,
+        222,
+        239,
+        247,
+        258,
+        268,
+        280,
+        288,
+        303,
+        315,
+        346,
+        363,
+        367,
+        365,
+        360,
+        330,
+        295,
+        283,
+        295,
+        322,
+        339,
+        329,
+        322,
+        300,
+        280,
+        263,
+        256,
+        247,
+        246,
+        538,
+        665,
+        666,
+        665,
+        484,
+        266,
+        209,
+        222,
+        239,
+        255,
+        264,
+        273,
+        281,
+        290,
+        301,
+        328,
+        353,
+        369,
+        373,
+        371,
+        342,
+        298,
+        267,
+        287,
+        315,
+        326,
+        324,
+        304,
+        271,
+        263,
+        264,
+        261,
+        245,
+        229,
+        436,
+        663,
+        666,
+        666,
+        600,
+        325,
+        213,
+        214,
+        227,
+        239,
+        254,
+        266,
+        272,
+        273,
+        279,
+        297,
+        339,
+        361,
+        368,
+        365,
+        351,
+        316,
+        282,
+        272,
+        302,
+        326,
+        333,
+        321,
+        309,
+        291,
+        269,
+        259,
+        252,
+        235,
+        346,
+        619,
+        665,
+        663,
+        468,
+        250,
+        226,
+        239,
+        246,
+        259,
+        269,
+        283,
+        286,
+        291,
+        305,
+        327,
+        350,
+        368,
+        371,
+        367,
+        346,
+        322,
+        295,
+        278,
+        295,
+        318,
+        327,
+        328,
+        311,
+        296,
+        292,
+        276,
+        267,
+        253,
+        298,
+        496,
+        664,
+        666,
+        623,
+        484,
+        253,
+        217,
+        228,
+        241,
+        264,
+        279,
+        281,
+        290,
+        296,
+        306,
+        319,
+        341,
+        365,
+        373,
+        357,
+        319,
+        293,
+        275,
+        281,
+        301,
+        321,
+        331,
+        323,
+        290,
+        266,
+        259,
+        259,
+        255,
+        243,
+        350,
+        617,
+        665,
+        668,
+        660,
+        419,
+        233,
+        223,
+        241,
+        254,
+        266,
+        274,
+        278,
+        284,
+        299,
+        314,
+        342,
+        361,
+        374,
+        372,
+        341,
+        312,
+        288,
+        267,
+        292,
+        318,
+        333,
+        328,
+        298,
+        271,
+        261,
+        260,
+        259,
+        248,
+        284,
+        524,
+        665,
+        666,
+        665,
+        536,
+        265,
+        213,
+        233,
+        253,
+        261,
+        272,
+        279,
+        284,
+        295,
+        305,
+        326,
+        351,
+        372,
+        379,
+        365,
+        354,
+        312,
+        277,
+        278,
+        310,
+        328,
+        329,
+        317,
+        296,
+        284,
+        268,
+        259,
+        247,
+        238,
+        404,
+        641,
+        665,
+        649,
+        522,
+        298,
+        210,
+        213,
+        229,
+        246,
+        264,
+        269,
+        272,
+        275,
+        289,
+        311,
+        336,
+        354,
+        365,
+        363,
+        339,
+        301,
+        286,
+        274,
+        298,
+        327,
+        336,
+        325,
+        302,
+        283,
+        279,
+        273,
+        255,
+        237,
+        246,
+        522,
+        665,
+        665,
+        550,
+        300,
+        201,
+        214,
+        239,
+        252,
+        265,
+        283,
+        297,
+        301,
+        304,
+        307,
+        329,
+        359,
+        376,
+        377,
+        366,
+        327,
+        291,
+        290,
+        319,
+        340,
+        344,
+        333,
+        300,
+        284,
+        273,
+        265,
+        261,
+        250,
+        386,
+        652,
+        666,
+        664,
+        462,
+        260,
+        237,
+        245,
+        255,
+        263,
+        282,
+        295,
+        302,
+        307,
+        322,
+        331,
+        333,
+        362,
+        377,
+        389,
+        383,
+        360,
+        314,
+        296,
+        286,
+        310,
+        342,
+        354,
+        345,
+        320,
+        301,
+        280,
+        271,
+        266,
+        256,
+        319,
+        536,
+        665,
+        666,
+        581,
+        333,
+        222,
+        221,
+        242,
+        256,
+        266,
+        275,
+        286,
+        301,
+        314,
+        320,
+        336,
+        355,
+        371,
+        377,
+        364,
+        328,
+        285,
+        287,
+        295,
+        313,
+        334,
+        337,
+        326,
+        301,
+        284,
+        271,
+        258,
+        253,
+        239,
+        387,
+        651,
+        665,
+        666,
+        464,
+        253,
+        235,
+        241,
+        259,
+        269,
+        273,
+        283,
+        293,
+        307,
+        318,
+        346,
+        359,
+        366,
+        388,
+        386,
+        353,
+        311,
+        293,
+        297,
+        321,
+        332,
+        344,
+        337,
+        311,
+        286,
+        269,
+        259,
+        240,
+        228,
+        298,
+        531,
+        665,
+        667,
+        584,
+        280,
+        225,
+        239,
+        249,
+        257,
+        262,
+        275,
+        289,
+        293,
+        309,
+        333,
+        346,
+        364,
+        374
+      ];
 
-    final resultCategory = _classifier.predict(imageInput);
+      final resultCategory = _classifier!.predict(inputData);
+      debugPrint('RESULTADO');
+      debugPrint(resultCategory.score.toString());
+      String resultJSON = jsonEncode(resultCategory);
+      debugPrint(resultJSON);
 
-    final result = resultCategory.score >= 0.8
-        ? _ResultStatus.found
-        : _ResultStatus.notFound;
-    final plantLabel = resultCategory.label;
-    final accuracy = resultCategory.score;
+      final result = resultCategory.score >= _confidenceThreshold
+          ? _ResultStatus.found
+          : _ResultStatus.notFound;
+      final signalLabel = resultCategory.label;
+      final accuracy = resultCategory.score;
 
-    _setAnalyzing(false);
-
-    setState(() {
-      _resultStatus = result;
-      _plantLabel = plantLabel;
-      _accuracy = accuracy;
-    });
+      setState(() {
+        _resultStatus = result;
+        _signalLabel = signalLabel;
+        _accuracy = accuracy;
+      });
+    } catch (e) {
+      debugPrint('Error during analysis: $e');
+      setState(() {
+        _resultStatus = _ResultStatus.notFound;
+        _signalLabel = 'Error';
+        _accuracy = 0.0;
+      });
+    } finally {
+      _setAnalyzing(false);
+    }
   }
 
   Widget _buildResultView() {
     var title = '';
 
     if (_resultStatus == _ResultStatus.notFound) {
+      //title = ;
       title = 'Fail to recognise';
     } else if (_resultStatus == _ResultStatus.found) {
-      title = _plantLabel;
-    } else {
-      title = '';
+      title = _signalLabel;
     }
 
-    //
     var accuracyLabel = '';
     if (_resultStatus == _ResultStatus.found) {
       accuracyLabel = 'Accuracy: ${(_accuracy * 100).toStringAsFixed(2)}%';
