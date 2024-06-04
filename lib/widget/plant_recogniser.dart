@@ -36,7 +36,8 @@ import '../styles.dart';
 import 'plant_photo_view.dart';
 
 const _labelsFileName = 'assets/labels.txt';
-const _modelFileName = 'model.tflite';
+// const _modelFileName = 'model.tflite';
+const _modelFileName = 'lstm_model.tflite';
 
 class ECGRecogniser extends StatefulWidget {
   const ECGRecogniser({super.key});

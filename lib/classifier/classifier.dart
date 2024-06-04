@@ -26,12 +26,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-import 'dart:ffi';
+// import 'dart:ffi';
 import 'dart:math';
+// import 'package:flutter/material.dart';
+import 'package:tflite_flutter/tflite_flutter.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart';
-import 'package:tflite_flutter/tflite_flutter.dart';
+// import 'package:tflite_flutter/tflite_flutter.dart';
 import 'package:tflite_flutter_helper/tflite_flutter_helper.dart';
 
 import 'classifier_category.dart';
@@ -67,7 +69,13 @@ class Classifier {
   }
 
   static Future<ClassifierModel> _loadModel(String modelFileName) async {
-    final interpreter = await Interpreter.fromAsset(modelFileName);
+    Delegate flexDelegate = await GpuDelegate();
+    var interpreterOptions = InterpreterOptions()..addDelegate(flexDelegate);
+
+    final interpreter = await Interpreter.fromAsset(
+      modelFileName,
+      options: interpreterOptions,
+    );
 
     // Get input and output shape from the model
     final inputShape = interpreter.getInputTensor(0).shape;
@@ -129,15 +137,15 @@ class Classifier {
     );
 
     debugPrint('Input length: ${input.length}');
-      debugPrint(
-  'Expected input dimensions: ${_model.interpreter.getInputTensor(0).shape}');
+    debugPrint(
+    'Expected input dimensions: ${_model.interpreter.getInputTensor(0).shape}');
 
-      var inputBuffer =
-          TensorBuffer.createFixedSize([1, 1000, 1], TfLiteType.float32);
-      inputBuffer.loadList(input, shape: [1, 1000, 1]);
+    var inputBuffer =
+        TensorBuffer.createFixedSize([1, 1000, 1], TfLiteType.float32);
+    inputBuffer.loadList(input, shape: [1, 1000, 1]);
 
-      debugPrint('LENGHTTTTTTTTTTTTTTTTTTTTTTTT');
-      // debugPrint(inputBuffer.shape.toString());
+    debugPrint('LENGHTTTTTTTTTTTTTTTTTTTTTTTT');
+    // debugPrint(inputBuffer.shape.toString());
 
     // Run inference
     _model.interpreter.run(inputBuffer.buffer, outputBuffer.buffer);
