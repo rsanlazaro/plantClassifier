@@ -26,6 +26,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+import 'dart:ffi';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -107,19 +108,19 @@ class Classifier {
     _model.interpreter.close();
   }
 
-  ClassifierCategory predict(Image image) {
-    debugPrint(
-      'Image: ${image.width}x${image.height}, '
-      'size: ${image.length} bytes',
-    );
+  ClassifierCategory predict(List<double> input) {
+    // debugPrint(
+    //   'Image: ${image.width}x${image.height}, '
+    //   'size: ${image.length} bytes',
+    // );
 
     // Load the image and convert it to TensorImage for TensorFlow Input
-    final inputImage = _preProcessInput(image);
+    // final inputImage = _preProcessInput(image);
 
-    debugPrint(
-      'Pre-processed image: ${inputImage.width}x${image.height}, '
-      'size: ${inputImage.buffer.lengthInBytes} bytes',
-    );
+    // debugPrint(
+    //   'Pre-processed image: ${inputImage.width}x${image.height}, '
+    //   'size: ${inputImage.buffer.lengthInBytes} bytes',
+    // );
 
     // Define the output buffer
     final outputBuffer = TensorBuffer.createFixedSize(
@@ -127,8 +128,19 @@ class Classifier {
       _model.outputType,
     );
 
+    debugPrint('Input length: ${input.length}');
+      debugPrint(
+  'Expected input dimensions: ${_model.interpreter.getInputTensor(0).shape}');
+
+      var inputBuffer =
+          TensorBuffer.createFixedSize([1, 1000, 1], TfLiteType.float32);
+      inputBuffer.loadList(input, shape: [1, 1000, 1]);
+
+      debugPrint('LENGHTTTTTTTTTTTTTTTTTTTTTTTT');
+      // debugPrint(inputBuffer.shape.toString());
+
     // Run inference
-    _model.interpreter.run(inputImage.buffer, outputBuffer.buffer);
+    _model.interpreter.run(inputBuffer.buffer, outputBuffer.buffer);
 
     debugPrint('OutputBuffer: ${outputBuffer.getDoubleList()}');
 

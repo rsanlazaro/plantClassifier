@@ -26,7 +26,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-name: plantrecogniser
+name: ECGRecogniser
 description: Plant recogniser in Flutter using TensorFlow Lite
 publish_to: 'none'
 
@@ -47,6 +47,7 @@ dependencies:
       url: https://github.com/filofan1/tflite_flutter_helper.git
       ref: 783f15e5a87126159147d8ea30b98eea9207ac70
   file_picker: ^4.6.1
+  dart_tensor: ^1.0.4
 
 
 dev_dependencies:
